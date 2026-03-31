@@ -98,40 +98,52 @@ def salvar_config(config: dict) -> None:
 # Helpers de escala
 # ---------------------------------------------------------------------------
 
-def obter_responsavel_atual() -> str:
-    """Retorna o nome do colaborador atual da escala."""
-    config = carregar_config()
-    colaboradores = config["colaboradores"]
-    return colaboradores[config["indice_atual"]]
+def _obter_par(colaboradores: list, idx: int) -> list:
+    """Retorna a dupla (1 ou 2 nomes) a partir do índice dado."""
+    total = len(colaboradores)
+    idx_norm = idx % total
+    par = [colaboradores[idx_norm]]
+    if idx_norm + 1 < total:
+        par.append(colaboradores[idx_norm + 1])
+    return par
 
 
-def avancar_escala() -> str:
-    """Avança o índice da escala para o próximo colaborador e salva."""
+def obter_responsavel_atual() -> list:
+    """Retorna a dupla atual da escala."""
+    config = carregar_config()
+    return _obter_par(config["colaboradores"], config["indice_atual"])
+
+
+def avancar_escala() -> list:
+    """Avança o índice da escala em 2 (dupla) e salva."""
     config = carregar_config()
     colaboradores = config["colaboradores"]
-    config["indice_atual"] = (config["indice_atual"] + 1) % len(colaboradores)
+    config["indice_atual"] = (config["indice_atual"] + 2) % len(colaboradores)
     salvar_config(config)
-    return colaboradores[config["indice_atual"]]
+    return _obter_par(colaboradores, config["indice_atual"])
 
 
-def obter_proximo() -> str:
-    """Retorna o nome do próximo colaborador sem avançar o índice."""
+def obter_proximo() -> list:
+    """Retorna a próxima dupla sem avançar o índice."""
     config = carregar_config()
     colaboradores = config["colaboradores"]
-    proximo_idx = (config["indice_atual"] + 1) % len(colaboradores)
-    return colaboradores[proximo_idx]
+    proximo_idx = (config["indice_atual"] + 2) % len(colaboradores)
+    return _obter_par(colaboradores, proximo_idx)
 
 
 def montar_mensagem_diaria() -> str:
-    """Monta a mensagem de notificação diária."""
-    responsavel = obter_responsavel_atual()
+    """Monta a mensagem de notificação diária para a dupla."""
+    dupla = obter_responsavel_atual()
     data_hoje = datetime.now().strftime("%d/%m/%Y")
-    proximo = obter_proximo()
+    proxima = obter_proximo()
+    nomes_hoje = "\n".join(f"👤 *{n}*" for n in dupla)
+    proxima_str = " + ".join(proxima)
+    label = "responsáveis" if len(dupla) > 1 else "responsável"
     return (
         f"{EMOJI_LIMPEZA} *Escala de Limpeza — {data_hoje}* {EMOJI_LIMPEZA}\n\n"
-        f"Olá, equipe! O responsável pela limpeza *hoje* é:\n\n"
-        f"👤 *{responsavel}*\n\n"
-        f"Próximo(a) na fila: _{proximo}_\n\n"
+        f"Olá, equipe! Os {label} pela limpeza *hoje* são:\n\n"
+        f"{nomes_hoje}\n\n"
+        f"Próxima dupla: _{proxima_str}_\n\n"
         f"Bom trabalho! {EMOJI_OK}"
     )
 
@@ -206,76 +218,92 @@ def cmd_start(message: telebot.types.Message) -> None:
 
 @bot.message_handler(commands=["hoje"])
 def cmd_hoje(message: telebot.types.Message) -> None:
-    """Informa quem é o responsável atual."""
-    responsavel = obter_responsavel_atual()
+    """Informa quem são os responsáveis atuais (dupla)."""
+    dupla = obter_responsavel_atual()
     data_hoje = datetime.now().strftime("%d/%m/%Y")
+    nomes = "\n".join(f"👤 *{n}*" for n in dupla)
+    label = "Responsáveis" if len(dupla) > 1 else "Responsável"
     texto = (
-        f"{EMOJI_CALENDARIO} *Responsável hoje ({data_hoje}):*\n\n"
-        f"👤 *{responsavel}*"
+        f"{EMOJI_CALENDARIO} *{label} hoje ({data_hoje}):*\n\n"
+        f"{nomes}"
     )
     bot.reply_to(message, texto)
 
 
 @bot.message_handler(commands=["escala"])
 def cmd_escala(message: telebot.types.Message) -> None:
-    """Exibe a lista completa de colaboradores e destaca o atual."""
+    """Exibe a lista completa de duplas e destaca a atual."""
     config = carregar_config()
     idx_atual = config["indice_atual"]
-    proximo = obter_proximo()
-
     colaboradores = config["colaboradores"]
-    linhas = [f"{EMOJI_LISTA} *Escala de Limpeza — Equipe Completa*\n"]
-    for i, nome in enumerate(colaboradores):
-        if i == idx_atual:
-            linhas.append(f"▶️ *{i + 1}. {nome}* ← atual")
-        else:
-            linhas.append(f"   {i + 1}. {nome}")
+    total = len(colaboradores)
+    proxima = obter_proximo()
+    proxima_str = " + ".join(proxima)
 
-    linhas.append(f"\n⏭️ Próximo(a): _{proximo}_")
+    linhas = [f"{EMOJI_LISTA} *Escala de Limpeza — Duplas*\n"]
+    dupla_num = 1
+    i = 0
+    while i < total:
+        par = _obter_par(colaboradores, i)
+        par_str = " + ".join(par)
+        if i == idx_atual:
+            linhas.append(f"▶️ *Dupla {dupla_num}: {par_str}* ← atual")
+        else:
+            linhas.append(f"   Dupla {dupla_num}: {par_str}")
+        i += len(par)
+        dupla_num += 1
+
+    linhas.append(f"\n⏭️ Próxima dupla: _{proxima_str}_")
     bot.reply_to(message, "\n".join(linhas))
 
 
 @bot.message_handler(commands=["pular"])
 def cmd_pular(message: telebot.types.Message) -> None:
-    """Pula a vez do colaborador atual, reinserindo-o na posição seguinte."""
+    """Pula a vez da dupla atual, reinserindo-a logo após a próxima dupla."""
     config = carregar_config()
     colaboradores = config["colaboradores"]
     idx = config["indice_atual"]
 
-    pulado = colaboradores[idx]
+    par_pulado = _obter_par(colaboradores, idx)
+    tamanho = len(par_pulado)
 
-    # Remove o colaborador pulado da posição atual
-    colaboradores.pop(idx)
+    # Remove a dupla da posição atual
+    for _ in range(tamanho):
+        if idx < len(colaboradores):
+            colaboradores.pop(idx)
+
     novo_total = len(colaboradores)
-
-    # Índice do próximo (quem assume agora pode ter mudado se idx era o último)
     novo_idx = idx % novo_total
 
-    # Reinsere o colaborador pulado logo após o próximo (amanhã ele faz a limpeza)
-    pos_insercao = novo_idx + 1
+    # Reinsere logo após a próxima dupla (2 posições à frente)
+    pos_insercao = novo_idx + 2
     if pos_insercao > novo_total:
-        pos_insercao = 1  # Envolve no final da lista
-    colaboradores.insert(pos_insercao, pulado)
+        pos_insercao = min(2, novo_total)
+    for i, nome in enumerate(par_pulado):
+        colaboradores.insert(pos_insercao + i, nome)
 
     config["indice_atual"] = novo_idx
     config["colaboradores"] = colaboradores
     salvar_config(config)
 
-    proximo = colaboradores[novo_idx]
-    depois = colaboradores[(novo_idx + 1) % len(colaboradores)]
+    proxima_dupla = _obter_par(colaboradores, novo_idx)
+    depois_dupla = _obter_par(colaboradores, (novo_idx + 2) % len(colaboradores))
+    pulado_str = " + ".join(par_pulado)
+    proxima_str = " + ".join(proxima_dupla)
+    depois_str = " + ".join(depois_dupla)
 
     texto = (
-        f"{EMOJI_PULAR} *Vez transferida!*\n\n"
-        f"_{pulado}_ foi movido(a) para o próximo dia.\n\n"
-        f"📅 *Hoje:* {proximo}\n"
-        f"📅 *Amanhã:* {depois}"
+        f"{EMOJI_PULAR} *Dupla transferida!*\n\n"
+        f"_{pulado_str}_ foram movidos(as) para o próximo dia.\n\n"
+        f"📅 *Hoje:* {proxima_str}\n"
+        f"📅 *Amanhã:* {depois_str}"
     )
     bot.reply_to(message, texto)
     logger.info(
-        "Comando /pular por %s. %s transferido(a) para amanhã. Hoje: %s.",
+        "Comando /pular por %s. Dupla %s transferida. Hoje: %s.",
         message.from_user.username or message.from_user.first_name,
-        pulado,
-        proximo,
+        pulado_str,
+        proxima_str,
     )
 
 
